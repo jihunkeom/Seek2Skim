@@ -807,9 +807,6 @@ class T5ForConditionalGenerationSeek2SkimFasterEval(T5PreTrainedModel):
         self.encoder_layer_tokens_left = [0.] * self.config.num_layers
         self.decoder_layer_tokens_left = [0.] * self.config.num_decoder_layers
         self.cross_layer_tokens_left = [0.] * self.config.num_decoder_layers
-        self.relative_flops = 0.
-        self.encoder_saved_flops = 0.
-        self.decoder_saved_flops = 0.
 
     def get_input_embeddings(self):
         return self.shared
@@ -837,9 +834,6 @@ class T5ForConditionalGenerationSeek2SkimFasterEval(T5PreTrainedModel):
         self.encoder_layer_tokens_left = [0.] * self.config.num_layers
         self.decoder_layer_tokens_left = [0.] * self.config.num_decoder_layers
         self.cross_layer_tokens_left = [0.] * self.config.num_decoder_layers
-        self.relative_flops = 0.
-        self.encoder_saved_flops = 0.
-        self.decoder_saved_flops = 0.
 
     def reset_instance(self):
         self.decoder.reset_instance()
@@ -1091,19 +1085,6 @@ class T5ForConditionalGenerationSeek2SkimFasterEval(T5PreTrainedModel):
         
         encoder_seq_lens = [encoder_seq_len.item() for _ in range(self.config.num_layers)]
         encoder_skimmed_lens = [encoder_seq_len.item()] + [x.sum(dim=1).item() for x in model_kwargs["encoder_outputs"].skim_mask]
-        encoder_mac = compute_encoder_macs(encoder_seq_lens, self.config.d_model, False)
-        encoder_skimmed_mac = compute_encoder_macs(encoder_skimmed_lens, self.config.d_model, True)
-        encoder_saved_mac = encoder_skimmed_mac / encoder_mac
-        self.encoder_saved_flops += encoder_saved_mac
-        decoder_mac = 0.
-        decoder_skimmed_mac = 0.
-        enc_kv_proj = [False for _ in range(self.config.num_decoder_layers)]
-        enc_kv_proj2 = [False for _ in range(self.config.num_decoder_layers)]
-        # print("Encoder info")
-        # print(encoder_seq_lens)
-        # print(encoder_skimmed_lens, encoder_exit_layer)
-        # print(f"Encoder Mac: {encoder_mac}, Encoder Skimmed Mac: {encoder_skimmed_mac}")
-        # print(f"Enc KV proj: {enc_kv_proj}")
         
         while cur_len < max_length:
             model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
@@ -1130,34 +1111,6 @@ class T5ForConditionalGenerationSeek2SkimFasterEval(T5PreTrainedModel):
                 if i < len(outputs.cross_skim_mask):
                     self.cross_layer_tokens_left[i+1] += (torch.mean(torch.sum(outputs.cross_skim_mask[i].to(torch.float32), dim=-1)) / encoder_seq_len).item()
             
-            decoder_mac_, enc_kv_proj = compute_decoder_macs2(
-                enc_kv_proj=enc_kv_proj,
-                vocab_size=self.config.vocab_size,
-                exit_layer=self.config.num_decoder_layers,
-                enc_sentence_lengths=encoder_seq_lens,
-                dec_sentence_lengths=decoder_seq_lens,
-                dim=self.config.d_model,
-                encoder_skimmed_lengths=None,
-                skim=False,
-            )
-            decoder_skimmed_mac_, enc_kv_proj2 = compute_decoder_macs2(
-                enc_kv_proj=enc_kv_proj2,
-                vocab_size=self.config.vocab_size,
-                exit_layer=decoder_exit_layer,
-                enc_sentence_lengths=encoder_seq_lens,
-                dec_sentence_lengths=decoder_skimmed_lens,
-                dim=self.config.d_model,
-                encoder_skimmed_lengths=cross_skimmed_lens,
-                skim=True,
-            )
-            decoder_mac += decoder_mac_
-            decoder_skimmed_mac += decoder_skimmed_mac_
-            # print(f"Step: {self.decoder.step}, enc_kv_proj: {enc_kv_proj}")
-            # print(decoder_seq_lens)
-            # print(decoder_skimmed_lens)
-            # print(cross_skimmed_lens)
-            # print(len(outputs.decoder_skim_mask) + 1, len(outputs.cross_skim_mask) + 1)
-            # print(f"Ratio: {round(decoder_skimmed_mac_ / decoder_mac_, 2)} Decoder Mac: {decoder_mac_}, Decoder SKimmed Mac: {decoder_skimmed_mac_}")
             ###
 
             if eos_token_id is not None:
@@ -1179,59 +1132,4 @@ class T5ForConditionalGenerationSeek2SkimFasterEval(T5PreTrainedModel):
 
             cur_len = cur_len + 1
         
-        self.relative_flops += (encoder_skimmed_mac + decoder_skimmed_mac) / (encoder_mac + decoder_mac)
-        self.decoder_saved_flops += decoder_skimmed_mac / decoder_mac
         return input_ids
-    
-def compute_encoder_macs(sentence_lengths, dim, skim=False):
-    def _layer_mac(seq_len, dim):
-        mac = 2 * dim * (seq_len ** 2)
-        mac += 12 * (dim ** 2) * seq_len
-        return mac
-
-    def _skim_mac(seq_len, dim):
-        skim_mac = (dim * (dim // 2) * seq_len) + ((dim // 2) * 2 * seq_len)
-        return skim_mac
-
-    mac = 0
-    for i in range(len(sentence_lengths)):
-        seq_len = sentence_lengths[i]
-        mac += _layer_mac(seq_len, dim)
-        if skim and i < len(sentence_lengths)-1:
-            mac += _skim_mac(seq_len, dim)
-    
-    return mac
-
-def compute_decoder_macs2(enc_kv_proj, vocab_size, exit_layer, enc_sentence_lengths, dec_sentence_lengths, dim, encoder_skimmed_lengths=None, skim=False):
-    def _layer_mac(enc_skimmed_seq_len, dec_seq_len, dim):
-        self_attn_mac = 2 * dec_seq_len * dim
-        self_attn_mac += 4 * (dim ** 2)
-        cross_attn_mac = 2 * (dim ** 2)
-        cross_attn_mac += 2 * dim * enc_skimmed_seq_len
-        ffn_mac = 8 * (dim ** 2)
-        return self_attn_mac + cross_attn_mac + ffn_mac
-    
-    def _skim_mac(dim):
-        return (dim * (dim // 2)) + ((dim // 2) * 2)
-
-    if len(enc_sentence_lengths) < exit_layer:
-        enc_sentence_lengths = enc_sentence_lengths + ([0.] * (exit_layer - len(enc_sentence_lengths)))
-    if encoder_skimmed_lengths is not None:
-        if len(encoder_skimmed_lengths) < exit_layer:
-            encoder_skimmed_lengths = encoder_skimmed_lengths + ([0.] * (exit_layer - len(encoder_skimmed_lengths)))
-
-    mac = 0
-    for i in range(exit_layer):
-        enc_seq_len = enc_sentence_lengths[i]
-        dec_seq_len = dec_sentence_lengths[i]
-        enc_skimmed_seq_len = encoder_skimmed_lengths[i] if encoder_skimmed_lengths is not None else enc_seq_len
-        mac += _layer_mac(enc_skimmed_seq_len, dec_seq_len, dim)
-        if skim and i < exit_layer-1:
-            mac += _skim_mac(dim)
-        if enc_kv_proj[i] == False:
-            enc_kv_proj[i] = True
-            mac += 2 * enc_seq_len * (dim ** 2)
-
-    mac += (dim * vocab_size)
-
-    return mac, enc_kv_proj

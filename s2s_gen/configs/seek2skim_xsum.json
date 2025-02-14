@@ -1,0 +1,21 @@
+{
+    "model_name_or_path": "./save/seek2skim/xsum(0.1,1.0,1.0)(1.0tau)",
+    "do_train": false,
+    "do_eval": true,
+    "dataset_name": "xsum",
+    "output_dir": "./save/seek2skim/xsum(0.1,1.0,1.0)(1.0tau)_cpu_eval",
+    "per_device_train_batch_size": 4,
+    "gradient_accumulation_steps": 2,
+    "per_device_eval_batch_size": 1,
+    "overwrite_output_dir": true,
+    "predict_with_generate": true,
+    "save_steps": 42500,
+    "source_prefix": "summarize: ",
+    "learning_rate": 1e-4,
+    "num_train_epochs": 5,
+    "encoder_skim_factor": 0.3,
+    "decoder_skim_factor": 1.0,
+    "cross_skim_factor": 1.0,
+    "gumbel_softmax_tau": 0.9,
+    "max_eval_samples": 200
+    }

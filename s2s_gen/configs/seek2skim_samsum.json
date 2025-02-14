@@ -1,0 +1,21 @@
+{
+    "model_name_or_path": "./save/seek2skim/samsum(0.9,1.0,1.0,tau1.0)",
+    "do_train": false,
+    "do_eval": true,
+    "dataset_name": "samsum",
+    "output_dir": "./save/seek2skim/samsum(0.9,1.0,1.0,tau1.0)_cpu_eval",
+    "per_device_train_batch_size": 8,
+    "per_device_eval_batch_size": 1,
+    "overwrite_output_dir": true,
+    "predict_with_generate": true,
+    "source_prefix": "summarize: ",
+    "save_steps": 12000,
+    "learning_rate": 1e-4,
+    "num_train_epochs": 20,
+    "gumbel_softmax_tau": 1.0,
+    "encoder_skim_factor": 0.7,
+    "decoder_skim_factor": 2.0,
+    "cross_skim_factor": 1.0,
+    "gradient_accumulation_steps": 1,
+    "max_eval_samples": 200
+    }
